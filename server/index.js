@@ -1,6 +1,7 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import { auth, requireUser } from './routes/auth.js';
+import { directory } from './routes/public.js';
 import { jobs } from './routes/jobs.js';
 
 const app = express();
@@ -18,6 +19,7 @@ app.use('/api', (req, res, next) => {
   next();
 });
 app.use('/api/auth', auth);
+app.use('/api/public', directory);
 app.use(
   '/api',
   requireUser,
