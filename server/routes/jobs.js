@@ -239,3 +239,63 @@ jobs.delete('/companies/:id/members/:userId', recruiter, async (req, res) => {
   res.sendStatus(204);
 });
 
+jobs.get('/analytics', recruiter, async (req, res) => {
+  const where = { company: teamCompanies(req.user.id) };
+  if (req.query.companyId) where.companyId = positiveId(req.query.companyId);
+  const items = await db.job.findMany({
+    where,
+    select: { id: true, title: true, company: { select: { name: true } } },
+    orderBy: { id: 'desc' },
+    ...pageOptions(req.query),
+  });
+  const groups = await db.application.groupBy({
+    by: ['jobId', 'stage'],
+    where: { jobId: { in: items.map((job) => job.id) } },
+    _count: true,
+  });
+  for (const job of items) {
+    job.counts = {};
+    job.total = 0;
+    for (const group of groups.filter((row) => row.jobId === job.id)) {
+      job.counts[group.stage] = group._count;
+      job.total += group._count;
+    }
+  }
+  res.json({ items, total: await db.job.count({ where }), pageSize });
+});
+
+jobs.get('/analytics/company', recruiter, async (req, res) => {
+  const jobsWhere = { company: teamCompanies(req.user.id) };
+  if (req.query.companyId) jobsWhere.companyId = positiveId(req.query.companyId);
+  const where = { job: jobsWhere };
+  const now = new Date();
+  const firstDay = new Date(now);
+  firstDay.setHours(0, 0, 0, 0);
+  firstDay.setDate(firstDay.getDate() - 13);
+  const last30 = new Date(now.getTime() - 30 * 86400000);
+
+  const [groups, recent, topJobs, scheduled, activeJobs, totalJobs] = await Promise.all([
+    db.application.groupBy({ by: ['stage'], where, _count: true }),
+    db.application.findMany({ where: { ...where, createdAt: { gte: last30 } }, select: { createdAt: true } }),
+    db.job.findMany({ where: { ...jobsWhere, applications: { some: {} } },
+      select: { id: true, title: true, _count: { select: { applications: true } } },
+      orderBy: [{ applications: { _count: 'desc' } }, { id: 'asc' }], take: 5 }),
+    db.interview.count({ where: { completed: false, application: { ...where, stage: 'INTERVIEW' } } }),
+    db.job.count({ where: { AND: [jobsWhere, acceptingApplications()] } }),
+    db.job.count({ where: jobsWhere }),
+  ]);
+  const counts = {};
+  let total = 0;
+  for (const group of groups) {
+    counts[group.stage] = group._count;
+    total += group._count;
+  }
+  const days = new Map();
+  for (const { createdAt } of recent) {
+    if (createdAt < firstDay) continue;
+    const day = new Date(createdAt).setHours(0, 0, 0, 0);
+    days.set(day, (days.get(day) || 0) + 1);
+  }
+  const daily = Array.from(days, ([day, count]) => ({ day, count })).sort((a,b) => a.day-b.day);
+  res.json({ counts, total, last30: recent.length, daily, topJobs, scheduled, activeJobs, totalJobs });
+});
