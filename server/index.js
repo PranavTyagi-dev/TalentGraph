@@ -2,6 +2,7 @@ import express from 'express';
 import cookieParser from 'cookie-parser';
 import { auth, requireUser } from './routes/auth.js';
 import { directory } from './routes/public.js';
+import { resumes } from './routes/resumes.js';
 import { jobs } from './routes/jobs.js';
 
 const app = express();
@@ -9,7 +10,12 @@ app.disable('x-powered-by');
 app.use('/api', express.json({ limit: '32kb' }), cookieParser());
 app.use('/api', (req, res, next) => {
   res.set('Cache-Control', 'no-store');
+  const isResumeUpload =
+    req.path === '/resumes' &&
+    req.method === 'POST' &&
+    req.is('application/pdf');
   if (
+    !isResumeUpload &&
     ['POST', 'PUT', 'PATCH'].includes(req.method) &&
     !req.is('application/json')
   ) {
@@ -20,6 +26,7 @@ app.use('/api', (req, res, next) => {
 });
 app.use('/api/auth', auth);
 app.use('/api/public', directory);
+app.use('/api/resumes', requireUser, resumes);
 app.use(
   '/api',
   requireUser,
