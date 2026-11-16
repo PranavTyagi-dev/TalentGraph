@@ -1,0 +1,172 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  RECRUITER
+  CANDIDATE
+}
+
+enum Stage {
+  IN_REVIEW
+  OFFERED
+  WITHDRAWN
+  APPLIED
+  SHORTLISTED
+  INTERVIEW
+  HIRED
+  REJECTED
+}
+
+model User {
+  memberships CompanyMember[]
+  meetings Interview[]
+  savedResumes SavedResume[]
+  id           Int           @id @default(autoincrement())
+  name         String
+  email        String        @unique
+  suspended    Boolean       @default(false)
+  passwordHash String
+  role         Role
+  sessions     Session[]
+  companies    Company[]
+  profile      Profile?
+  applications Application[]
+}
+
+model Session {
+  token     String   @id
+  userId    Int
+  expiresAt DateTime
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Profile {
+  userId     Int    @id
+  summary    String @default("")
+  experience String @default("")
+  education  String @default("")
+  projects   String @default("")
+  headline   String @default("")
+  skills     String @default("")
+  resumeName String @default("")
+  resumeUrl  String @default("")
+  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model CompanyMember {
+  companyId Int
+  userId Int
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([companyId, userId])
+}
+
+model Company {
+  suspended Boolean @default(false)
+  members CompanyMember[]
+  id          Int    @id @default(autoincrement())
+  name        String
+  description String
+  recruiterId Int
+  recruiter   User   @relation(fields: [recruiterId], references: [id])
+  jobs        Job[]
+
+  @@unique([recruiterId, name])
+}
+
+model Job {
+  publication String @default("Published")
+  id              Int           @id @default(autoincrement())
+  title           String
+  location        String
+  description     String
+  employmentType  String        @default("")
+  experienceLevel String        @default("")
+  deadline        DateTime?
+  compensation    String        @default("")
+  requiredSkills  String        @default("")
+  workMode        String        @default("")
+  isOpen          Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  companyId       Int
+  company         Company       @relation(fields: [companyId], references: [id])
+  applications    Application[]
+}
+
+model Application {
+  id          Int                @id @default(autoincrement())
+  jobId       Int
+  candidateId Int
+  stage       Stage              @default(APPLIED)
+  createdAt   DateTime           @default(now())
+  job         Job                @relation(fields: [jobId], references: [id])
+  candidate   User               @relation(fields: [candidateId], references: [id])
+  coverNote   String             @default("")
+  events      ApplicationEvent[]
+  notes       RecruiterNote[]
+  resume      ApplicationResume?
+  interview   Interview?
+
+  @@unique([jobId, candidateId])
+}
+
+model ApplicationEvent {
+  id            Int         @id @default(autoincrement())
+  applicationId Int
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  message       String
+  actor         String
+  createdAt     DateTime    @default(now())
+  seen          Boolean     @default(false)
+}
+
+model RecruiterNote {
+  id            Int         @id @default(autoincrement())
+  applicationId Int
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  text          String
+  createdAt     DateTime    @default(now())
+}
+
+model AdminAction {
+  id        Int      @id @default(autoincrement())
+  actor     String
+  message   String
+  createdAt DateTime @default(now())
+}
+
+model ApplicationResume {
+  applicationId Int         @id
+  name          String
+  content       Bytes
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}
+
+model Interview {
+  interviewerId Int?
+  interviewer User? @relation(fields: [interviewerId], references: [id], onDelete: SetNull)
+  completed     Boolean     @default(false)
+  confirmed     Boolean     @default(false)
+  id            Int         @id @default(autoincrement())
+  applicationId Int         @unique
+  scheduledAt   DateTime
+  location      String
+  feedback      String      @default("")
+  application   Application @relation(fields: [applicationId], references: [id])
+}
+
+model SavedResume {
+  id Int @id @default(autoincrement())
+  userId Int
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name String
+  content Bytes
+  isDefault Boolean @default(false)
+}
