@@ -4,6 +4,7 @@ import { auth, requireUser } from './routes/auth.js';
 import { directory } from './routes/public.js';
 import { resumes } from './routes/resumes.js';
 import { jobs } from './routes/jobs.js';
+import { applications } from './routes/applications.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -11,7 +12,7 @@ app.use('/api', express.json({ limit: '32kb' }), cookieParser());
 app.use('/api', (req, res, next) => {
   res.set('Cache-Control', 'no-store');
   const isResumeUpload =
-    req.path === '/resumes' &&
+    ['/applications', '/resumes'].includes(req.path) &&
     req.method === 'POST' &&
     req.is('application/pdf');
   if (
@@ -35,7 +36,8 @@ app.use(
       return res.status(403).json({ error: 'Use the administration workspace.' });
     next();
   },
-  jobs
+  jobs,
+  applications
 );
 app.use('/api', (req, res) => res.status(404).json({ error: 'API route not found.' }));
 
