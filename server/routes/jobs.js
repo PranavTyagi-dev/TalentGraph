@@ -7,6 +7,7 @@ import { employmentTypes, experienceLevels, workModes } from '../../shared/jobOp
 
 export const jobs = Router();
 const recruiter = requireRole('RECRUITER');
+const candidate = requireRole('CANDIDATE');
 
 export function teamCompanies(userId) {
   return { suspended: false, OR: [{ recruiterId: userId }, { members: { some: { userId } } }] };
@@ -184,6 +185,31 @@ jobs.put('/jobs/:id', recruiter, async (req, res) => {
       },
     })
   );
+});
+
+jobs.get('/profile', candidate, async (req, res) => {
+  res.json(await db.profile.findUniqueOrThrow({ where: { userId: req.user.id } }));
+});
+
+jobs.put('/profile', candidate, async (req, res) => {
+  const data = {};
+  for (const key of ['headline', 'skills', 'resumeName', 'resumeUrl']) {
+    data[key] = field(req.body[key], key, key === 'resumeUrl' ? 2000 : 300, false);
+  }
+  for (const key of ['summary', 'experience', 'education', 'projects']) {
+    if (req.body[key] !== undefined) data[key] = field(req.body[key], key, 2000, false);
+  }
+  if (Boolean(data.resumeName) !== Boolean(data.resumeUrl))
+    fail(400, 'Provide both a resume name and its link.');
+  if (data.resumeUrl) {
+    if (
+      !URL.canParse(data.resumeUrl) ||
+      !['http:', 'https:'].includes(new URL(data.resumeUrl).protocol)
+    ) {
+      fail(400, 'Enter a valid http or https resume link.');
+    }
+  }
+  res.json(await db.profile.update({ where: { userId: req.user.id }, data }));
 });
 
 jobs.post('/companies/:id/members', recruiter, async (req, res) => {
