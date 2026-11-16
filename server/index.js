@@ -1,6 +1,7 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
-import { auth } from './routes/auth.js';
+import { auth, requireUser } from './routes/auth.js';
+import { jobs } from './routes/jobs.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -17,6 +18,16 @@ app.use('/api', (req, res, next) => {
   next();
 });
 app.use('/api/auth', auth);
+app.use(
+  '/api',
+  requireUser,
+  (req, res, next) => {
+    if (req.user.role === 'ADMIN')
+      return res.status(403).json({ error: 'Use the administration workspace.' });
+    next();
+  },
+  jobs
+);
 app.use('/api', (req, res) => res.status(404).json({ error: 'API route not found.' }));
 
 app.use((err, req, res, next) => {
