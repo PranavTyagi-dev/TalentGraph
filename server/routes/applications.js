@@ -138,3 +138,63 @@ applications.get('/applications/:id/resume', async (req, res) => {
   res.type('application/pdf').send(Buffer.from(resume.content));
 });
 
+applications.patch('/applications/:id/stage', recruiter, async (req, res) => {
+  const where = ownedApplication(req);
+  const application = await db.application.findUniqueOrThrow({ where });
+  const stage = req.body.stage;
+  if (stage === 'INTERVIEW') fail(400, 'Schedule an interview to enter this stage.');
+  if (!nextStages[application.stage].includes(stage))
+    fail(409, 'This stage change is unavailable.');
+  // Matching the previous stage prevents two reviewers from overwriting a decision.
+  res.json(
+    await db.application.update({
+      where: { ...where, stage: application.stage },
+      data: {
+        stage,
+        events: {
+          create: event(req.user, 'Stage changed to ' + stage.toLowerCase().replace('_', ' ')),
+        },
+      },
+    })
+  );
+});
+
+applications.post('/applications/:id/notes', recruiter, async (req, res) => {
+  const text = field(req.body.text, 'note', 2000);
+  await db.application.update({
+    where: ownedApplication(req),
+    data: { notes: { create: { text } } },
+  });
+  res.sendStatus(204);
+});
+
+applications.post('/applications/:id/withdraw', requireRole('CANDIDATE'), async (req, res) => {
+  const where = {
+    ...ownedApplication(req),
+    stage: { in: ['APPLIED', 'IN_REVIEW', 'SHORTLISTED', 'INTERVIEW', 'OFFERED'] },
+  };
+  await db.application.update({
+    where,
+    data: { stage: 'WITHDRAWN', events: { create: event(req.user, 'Application withdrawn') } },
+  });
+  res.sendStatus(204);
+});
+
+applications.get('/updates', requireRole('CANDIDATE'), async (req, res) => {
+  const where = { application: { candidateId: req.user.id } };
+  const items = await db.applicationEvent.findMany({
+    where,
+    orderBy: { id: 'desc' },
+    ...pageOptions(req.query),
+    include: { application: { select: { job: { select: { title: true } } } } },
+  });
+  res.json({ items, total: await db.applicationEvent.count({ where }), pageSize });
+});
+
+applications.patch('/updates/:id/read', requireRole('CANDIDATE'), async (req, res) => {
+  await db.applicationEvent.update({
+    where: { id: positiveId(req.params.id), application: { candidateId: req.user.id } },
+    data: { seen: true },
+  });
+  res.sendStatus(204);
+});
