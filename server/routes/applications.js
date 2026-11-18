@@ -159,6 +159,136 @@ applications.patch('/applications/:id/stage', recruiter, async (req, res) => {
   );
 });
 
+applications.put('/applications/:id/interview', recruiter, async (req, res) => {
+  const where = ownedApplication(req);
+  const scheduledAt = new Date(req.body.scheduledAt);
+  if (!Number.isFinite(scheduledAt.getTime()) || scheduledAt <= new Date())
+    fail(400, 'Choose a future time.');
+  const location = field(req.body.location, 'meeting place or link', 500);
+  // Both changes commit together. Each application has a single interview slot.
+  const result = await db.$transaction(
+    async (tx) => {
+      const application = await tx.application.findUniqueOrThrow({ where });
+      // Two 30-minute slots overlap when their start times are less than 30 minutes apart.
+      const halfHour = 30 * 60 * 1000;
+      const conflict = await tx.interview.findFirst({
+        where: {
+          applicationId: { not: where.id },
+          completed: false,
+          scheduledAt: {
+            gt: new Date(scheduledAt.getTime() - halfHour),
+            lt: new Date(scheduledAt.getTime() + halfHour),
+          },
+          application: { stage: 'INTERVIEW' },
+          OR: [
+            { application: { candidateId: application.candidateId } },
+            { interviewerId: req.user.id },
+            {
+              interviewerId: null,
+              application: { job: { company: { recruiterId: req.user.id } } },
+            },
+          ],
+        },
+      });
+      if (conflict)
+        fail(409, 'The recruiter or candidate already has an interview during this slot.');
+      const updated = await tx.application.updateMany({
+        where: {
+          ...where,
+          stage: { in: ['IN_REVIEW', 'SHORTLISTED', 'INTERVIEW'] },
+          NOT: { interview: { completed: true } },
+        },
+        data: { stage: 'INTERVIEW' },
+      });
+      if (!updated.count) fail(409, 'Choose a shortlisted application or an active interview.');
+      await tx.applicationEvent.create({
+        data: {
+          applicationId: where.id,
+          ...event(req.user, 'Interview scheduled for ' + scheduledAt.toISOString()),
+        },
+      });
+      return tx.interview.upsert({
+        where: { applicationId: where.id },
+        create: { applicationId: where.id, scheduledAt, location, interviewerId: req.user.id },
+        update: {
+          scheduledAt,
+          location,
+          interviewerId: req.user.id,
+          confirmed: false,
+          completed: false,
+        },
+      });
+    },
+    { isolationLevel: 'Serializable' }
+  );
+  res.json(result);
+});
+
+applications.patch('/applications/:id/confirm', requireRole('CANDIDATE'), async (req, res) => {
+  const scheduledAt = new Date(req.body.scheduledAt);
+  if (!Number.isFinite(scheduledAt.getTime()) || scheduledAt <= new Date())
+    fail(400, 'Select an upcoming interview.');
+  const updated = await db.interview.updateMany({
+    where: {
+      applicationId: positiveId(req.params.id),
+      completed: false,
+      scheduledAt,
+      location: field(req.body.location, 'meeting place or link', 500),
+      application: { candidateId: req.user.id, stage: 'INTERVIEW' },
+    },
+    data: { confirmed: true },
+  });
+  if (!updated.count) fail(409, 'This invitation has changed. Reopen the application.');
+  res.sendStatus(204);
+});
+
+applications.patch('/applications/:id/feedback', recruiter, async (req, res) => {
+  const where = ownedApplication(req);
+  const feedback = field(req.body.feedback, 'feedback', 3000);
+  res.json(
+    await db.interview.update({
+      where: { applicationId: where.id, application: where },
+      data: { feedback },
+    })
+  );
+});
+
+applications.get('/overview', async (req, res) => {
+  const where = visibleApplications(req.user);
+  const openJobs = acceptingApplications();
+  if (req.user.role === 'RECRUITER') openJobs.company = teamCompanies(req.user.id);
+  const groups = await db.application.groupBy({ by: ['stage'], where, _count: true });
+  const counts = {};
+  for (const stage of Object.keys(nextStages)) counts[stage] = 0;
+  for (const group of groups) counts[group.stage] = group._count;
+  const recent = await db.application.findMany({
+    where,
+    take: 4,
+    orderBy: { id: 'desc' },
+    include: {
+      resume: { select: { name: true } },
+      candidate: { select: { name: true, profile: { select: { resumeUrl: true } } } },
+      job: jobDetails,
+    },
+  });
+  const upcoming = await db.interview.findMany({
+    where: {
+      completed: false,
+      application: { ...where, stage: 'INTERVIEW' },
+      scheduledAt: { gte: new Date() },
+    },
+    orderBy: { scheduledAt: 'asc' },
+    take: 3,
+    select: {
+      id: true,
+      scheduledAt: true,
+      location: true,
+      application: { select: { job: jobDetails, candidate: { select: { name: true } } } },
+    },
+  });
+  res.json({ counts, openJobs: await db.job.count({ where: openJobs }), recent, upcoming });
+});
+
 applications.post('/applications/:id/notes', recruiter, async (req, res) => {
   const text = field(req.body.text, 'note', 2000);
   await db.application.update({
@@ -178,6 +308,60 @@ applications.post('/applications/:id/withdraw', requireRole('CANDIDATE'), async 
     data: { stage: 'WITHDRAWN', events: { create: event(req.user, 'Application withdrawn') } },
   });
   res.sendStatus(204);
+});
+
+applications.post('/applications/:id/interview/cancel', recruiter, async (req, res) => {
+  await db.application.update({
+    where: { ...ownedApplication(req), stage: 'INTERVIEW', interview: { completed: false } },
+    data: {
+      stage: 'SHORTLISTED',
+      interview: { delete: true },
+      events: { create: event(req.user, 'Interview cancelled. Returned to shortlist.') },
+    },
+  });
+  res.sendStatus(204);
+});
+
+applications.post('/applications/:id/interview/complete', recruiter, async (req, res) => {
+  await db.application.update({
+    where: {
+      ...ownedApplication(req),
+      stage: 'INTERVIEW',
+      interview: { completed: false, scheduledAt: { lte: new Date() } },
+    },
+    data: {
+      interview: { update: { completed: true } },
+      events: { create: event(req.user, 'Interview completed') },
+    },
+  });
+  res.sendStatus(204);
+});
+
+applications.get('/interviews', async (req, res) => {
+  const meetings = await db.interview.findMany({
+    where: { application: visibleApplications(req.user) },
+    select: {
+      scheduledAt: true,
+      location: true,
+      confirmed: true,
+      completed: true,
+      application: {
+        select: {
+          id: true,
+          stage: true,
+          job: { select: { title: true } },
+          candidate: { select: { name: true } },
+        },
+      },
+    },
+    orderBy: { scheduledAt: 'desc' },
+    ...pageOptions(req.query),
+  });
+  res.json({
+    items: meetings,
+    total: await db.interview.count({ where: { application: visibleApplications(req.user) } }),
+    pageSize,
+  });
 });
 
 applications.get('/updates', requireRole('CANDIDATE'), async (req, res) => {
