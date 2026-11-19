@@ -3,6 +3,7 @@ import cookieParser from 'cookie-parser';
 import { auth, requireUser } from './routes/auth.js';
 import { directory } from './routes/public.js';
 import { resumes } from './routes/resumes.js';
+import { admin } from './routes/admin.js';
 import { jobs } from './routes/jobs.js';
 import { applications } from './routes/applications.js';
 
@@ -28,6 +29,7 @@ app.use('/api', (req, res, next) => {
 app.use('/api/auth', auth);
 app.use('/api/public', directory);
 app.use('/api/resumes', requireUser, resumes);
+app.use('/api/admin', requireUser, admin);
 app.use(
   '/api',
   requireUser,
