@@ -1,5 +1,7 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { auth, requireUser } from './routes/auth.js';
 import { directory } from './routes/public.js';
 import { resumes } from './routes/resumes.js';
@@ -8,6 +10,7 @@ import { jobs } from './routes/jobs.js';
 import { applications } from './routes/applications.js';
 
 const app = express();
+const dist = fileURLToPath(new URL('../dist/', import.meta.url));
 app.disable('x-powered-by');
 app.use('/api', express.json({ limit: '32kb' }), cookieParser());
 app.use('/api', (req, res, next) => {
@@ -42,6 +45,8 @@ app.use(
   applications
 );
 app.use('/api', (req, res) => res.status(404).json({ error: 'API route not found.' }));
+app.use(express.static(dist));
+app.get('/', (req, res) => res.sendFile(path.join(dist, 'index.html')));
 
 app.use((err, req, res, next) => {
   if (err.code === 'P2002') return res.status(409).json({ error: 'This record already exists.' });
