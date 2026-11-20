@@ -59,6 +59,7 @@ app.use((err, req, res, next) => {
 });
 
 const port = Number(process.env.PORT || 3030);
-app.listen(port, '127.0.0.1', () =>
+const host = process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1';
+app.listen(port, host, () =>
   console.log(`TalentGraph is running at http://127.0.0.1:${port}`)
 );

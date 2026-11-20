@@ -6,12 +6,12 @@
   "engines": { "node": ">=22.12.0" },
   "scripts": {
     "build": "vite build client --outDir ../dist --emptyOutDir",
-    "start": "node --env-file=.env server/index.js",
-    "dev:api": "node --watch --env-file=.env server/index.js",
+    "start": "node --env-file-if-exists=.env server/index.js",
+    "dev:api": "node --watch --env-file-if-exists=.env server/index.js",
     "dev:ui": "vite client",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
-    "db:seed": "node --env-file=.env prisma/seed.js"
+    "db:seed": "node --env-file-if-exists=.env prisma/seed.js"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",
