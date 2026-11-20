@@ -246,3 +246,7 @@ TalentGraph will initially follow a modular backend architecture.
                           |
                           v
                       PostgreSQL
+
+## Run the capstone
+
+See [Setup and demo](SETUP.md) for installation, demo accounts and the implemented features. See [Viva guide](VIVA.md) for the code walkthrough.
